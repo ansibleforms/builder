@@ -41,15 +41,6 @@ A builder works with every controller that speaks the same contract, whatever th
 Each AnsibleForms release publishes [`ansibleforms-rte-builder`](https://github.com/ansibleforms/builder/releases) at the same version, for amd64 and arm64.
 A builder needs a controller with RTE images (AnsibleForms 7.8.0 and later); [CHANGELOG.md](CHANGELOG.md) lists its own changes.
 
-## Documentation
-
-The guides in [docs](docs) cover running it and what to check when it does not work.
-
-| Guide | What it covers |
-|---|---|
-| [Install](docs/install.md) | Docker, Compose and Kubernetes, the settings, the security options |
-| [Troubleshooting](docs/troubleshooting.md) | BuildKit, joining, registries over http, signing |
-
 ## Contributing
 
 Contributions are welcome. Start with these files:
