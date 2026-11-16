@@ -1,0 +1,48 @@
+name: CI
+
+# Every push and pull request : the tests, then the image built and its tools started (buildctl,
+# buildkitd, rootlesskit, cosign) - nothing pushed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: ansibleforms-rte-builder:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test the image
+        run: |
+          set -euo pipefail
+          for tool in "buildctl --version" "buildkitd --version" "rootlesskit --version" "cosign version" "node --version"; do
+            docker run --rm --entrypoint sh ansibleforms-rte-builder:ci -c "$tool"
+          done
+          # without its settings it refuses to start, saying why
+          docker run --rm ansibleforms-rte-builder:ci 2>&1 | grep -q "set RTE_TOKEN"

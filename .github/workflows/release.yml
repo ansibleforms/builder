@@ -1,0 +1,72 @@
+name: Release
+
+# release-please keeps a release pull request open from the Conventional Commits on main ; merged,
+# it tags the release and this workflow publishes the image for it, on amd64 and arm64 :
+#   ghcr.io/ansibleforms/ansibleforms-rte-builder:<version>, :<major>.<minor>, :<major> and :latest
+#
+# The release is made with a token of the ansibleforms-release GitHub App, so it is
+# ansibleforms[bot]'s, as the app's : it needs the variable RELEASE_APP_CLIENT_ID and the secret
+# RELEASE_APP_PRIVATE_KEY in this repository.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    outputs:
+      created: ${{ steps.rp.outputs.release_created }}
+      version: ${{ steps.rp.outputs.version }}
+      major: ${{ steps.rp.outputs.major }}
+      minor: ${{ steps.rp.outputs.minor }}
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: app
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      - uses: googleapis/release-please-action@v5
+        id: rp
+        with:
+          token: ${{ steps.app.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish:
+    name: Publish the image
+    needs: release
+    if: needs.release.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ needs.release.outputs.version }}
+          tags: |
+            ghcr.io/ansibleforms/ansibleforms-rte-builder:${{ needs.release.outputs.version }}
+            ghcr.io/ansibleforms/ansibleforms-rte-builder:${{ needs.release.outputs.major }}.${{ needs.release.outputs.minor }}
+            ghcr.io/ansibleforms/ansibleforms-rte-builder:${{ needs.release.outputs.major }}
+            ghcr.io/ansibleforms/ansibleforms-rte-builder:latest

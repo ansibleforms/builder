@@ -1,0 +1,33 @@
+name: Contract
+
+# Every week, and by hand : the socket contract this builder speaks is still the one of the
+# controller's latest release (ansibleforms/ansibleforms server/src/rte/socket/protocol.js). When it
+# is not, the test fails and says so : a builder that speaks the new contract must be released.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: The controller's latest release
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "tag=$(gh release view --repo ansibleforms/ansibleforms --json tagName --jq .tagName)" >> "$GITHUB_OUTPUT"
+      - run: npm test -- tests/contract.test.js
+        env:
+          CONTROLLER_PROTOCOL_URL: https://raw.githubusercontent.com/ansibleforms/ansibleforms/${{ steps.latest.outputs.tag }}/server/src/rte/socket/protocol.js
