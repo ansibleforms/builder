@@ -1,0 +1,111 @@
+name: Follow app release
+
+# Keeps the builder on par with AnsibleForms. When the app releases, its release workflow sends an
+# app-release repository_dispatch here with the tag. This workflow checks that the socket contract
+# the builder speaks is still the app's at that tag, moves package.json to the release's version,
+# turns the changelog's Unreleased section into the release's entry and opens a pull request with
+# auto-merge on. Merged once CI is green, the Release workflow publishes the builder of that version.
+#
+# Another socket contract : nothing is moved, an issue says the builder must learn it first (copy
+# the app's server/src/rte/socket files that changed, raise SOCKET_CONTRACT), then run this by hand.
+#
+# The pull request is opened with a token of the ansibleforms-release GitHub App, so its checks run
+# (one opened with GITHUB_TOKEN starts no workflows).
+
+on:
+  repository_dispatch:
+    types: [app-release]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'AnsibleForms version to follow, e.g. 7.8.0'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: follow-app-release
+  cancel-in-progress: false
+
+jobs:
+  follow:
+    name: Open the version bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: The version and its contract
+        id: target
+        env:
+          RAW: ${{ github.event.client_payload.tag || inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${RAW#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$RAW' is not a release version (x.y.z)."; exit 1
+          fi
+          theirs="$(curl -fsSL "https://raw.githubusercontent.com/ansibleforms/ansibleforms/${version}/server/src/rte/socket/protocol.js" | sed -nE 's/^export const SOCKET_CONTRACT = ([0-9]+);$/\1/p')"
+          ours="$(sed -nE 's/^export const SOCKET_CONTRACT = ([0-9]+);$/\1/p' src/socket/protocol.js)"
+          now="$(node -p "require('./package.json').version")"
+          echo "AnsibleForms $version speaks contract $theirs, the builder $ours ; the builder is at $now"
+          {
+            echo "version=$version"
+            echo "theirs=$theirs"
+            echo "ours=$ours"
+            echo "now=$now"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Another contract needs the builder taught first
+        if: steps.target.outputs.theirs != steps.target.outputs.ours
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.target.outputs.version }}
+          THEIRS: ${{ steps.target.outputs.theirs }}
+        run: |
+          set -euo pipefail
+          title="Speak socket contract ${THEIRS} for AnsibleForms ${VERSION}"
+          if [ -n "$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[].number')" ]; then
+            echo "The issue is open already."; exit 0
+          fi
+          gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "AnsibleForms ${VERSION} speaks socket contract ${THEIRS}. Copy the files of its server/src/rte/socket that changed into src/socket, raise SOCKET_CONTRACT, then run Follow app release by hand with ${VERSION}."
+
+      - uses: actions/create-github-app-token@v3
+        id: app
+        if: steps.target.outputs.theirs == steps.target.outputs.ours
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Move the version and open the pull request
+        if: steps.target.outputs.theirs == steps.target.outputs.ours
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          VERSION: ${{ steps.target.outputs.version }}
+        run: |
+          set -euo pipefail
+          now="$(node -p "require('./package.json').version")"
+          if [ "$(printf '%s\n%s\n' "$now" "$VERSION" | sort -V | tail -1)" = "$now" ]; then
+            echo "The builder is at $now already, nothing to do for $VERSION."; exit 0
+          fi
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          python3 - <<'PY'
+          import os, re
+          v = os.environ["VERSION"]
+          log = open("CHANGELOG.md").read()
+          m = re.search(r"(?s)^## Unreleased\n(.*?)(?=^## |\Z)", log, re.M)
+          body = m.group(1).strip("\n") if m else ""
+          entry = f"## Unreleased\n\n## {v}\n\nThe RTE builder of [AnsibleForms {v}](https://github.com/ansibleforms/ansibleforms/releases/tag/{v}).\n" + (f"\n{body}\n" if body else "") + "\n"
+          log = log[:m.start()] + entry + log[m.end():] if m else log + "\n" + entry
+          open("CHANGELOG.md", "w").write(log)
+          PY
+          branch="chore/follow-${VERSION}"
+          git config user.name "ansibleforms[bot]"
+          git config user.email "ansibleforms[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -am "chore: release ${VERSION}"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$branch"
+          url="$(gh pr create -R "$GITHUB_REPOSITORY" --base main --head "$branch" --title "chore: release ${VERSION}" --body "Follows [AnsibleForms ${VERSION}](https://github.com/ansibleforms/ansibleforms/releases/tag/${VERSION}): the builder is released at the same version once this is merged and CI is green.")"
+          gh pr merge "$url" --squash --auto
