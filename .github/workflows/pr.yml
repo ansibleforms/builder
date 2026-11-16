@@ -1,0 +1,37 @@
+name: PR
+
+# Pull requests are squash-merged, and the squash commit takes the PR title as its message, so it
+# has to be a Conventional Commit : the same rule as the app repository (CONTRIBUTING.md).
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  title:
+    name: Title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            revert
+            security
+            docs
+            test
+            ci
+            chore
+            build
+            style
+          subjectPattern: ^[a-z].*$
+          subjectPatternError: The subject starts with a lower case letter.
