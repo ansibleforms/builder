@@ -1,7 +1,7 @@
 version: 2
 
 # Keeps the npm packages, the image's pins (node, BuildKit, cosign) and the workflow actions up to
-# date. Never grouped : one pull request per dependency. Majors are taken by hand.
+# date. Never grouped : one pull request per dependency, majors included (read their changelog).
 
 updates:
   - package-ecosystem: npm
@@ -11,9 +11,6 @@ updates:
     commit-message:
       prefix: build
       include: scope
-    ignore:
-      - dependency-name: '*'
-        update-types: ['version-update:semver-major']
 
   - package-ecosystem: docker
     directory: /
@@ -22,9 +19,6 @@ updates:
     commit-message:
       prefix: build
       include: scope
-    ignore:
-      - dependency-name: '*'
-        update-types: ['version-update:semver-major']
 
   - package-ecosystem: github-actions
     directory: /
@@ -32,6 +26,3 @@ updates:
       interval: weekly
     commit-message:
       prefix: ci
-    ignore:
-      - dependency-name: '*'
-        update-types: ['version-update:semver-major']
