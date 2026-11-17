@@ -181,12 +181,13 @@ async function runBuild(jobId, build, secrets) {
     const digest = JSON.parse(fs.readFileSync(meta, "utf8"))["containerimage.digest"] || "";
     artifacts.digest = digest;
     say(jobId, `Pushed ${build.ref}${digest ? `@${digest}` : ""}`);
-    // step 3 : signed with the team's key, offline (no public transparency log)
+    // step 3 : signed with the team's key, offline (no public transparency log) : cosign 3 signs
+    // through a signing config by default, which refuses --tlog-upload=false, so it is turned off
     if (build.sign && secrets.signing?.key) {
       const key = path.join(dir, "cosign.key");
       fs.writeFileSync(key, secrets.signing.key, { mode: 0o600 });
       const target = digest ? `${build.ref.replace(/:[^:/]+$/, "")}@${digest}` : build.ref;
-      const signed = await run(jobId, "cosign", ["sign", "--yes", "--tlog-upload=false", "--key", key, target], { DOCKER_CONFIG: conf, COSIGN_PASSWORD: secrets.signing.password || "" });
+      const signed = await run(jobId, "cosign", ["sign", "--yes", "--use-signing-config=false", "--tlog-upload=false", "--key", key, target], { DOCKER_CONFIG: conf, COSIGN_PASSWORD: secrets.signing.password || "" });
       if (signed !== 0) {
         message = `the image was pushed but could not be signed (cosign exited with ${signed})`;
         return;
