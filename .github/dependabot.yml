@@ -1,10 +1,14 @@
 version: 2
 
+# Every pending update gets its pull request at once (open-pull-requests-limit: 100 on each
+# entry, as Dependabot has no unlimited value), instead of five at a time per entry.
+
 # Keeps the npm packages, the image's pins (node, BuildKit, cosign) and the workflow actions up to
 # date. Never grouped : one pull request per dependency, majors included (read their changelog).
 
 updates:
   - package-ecosystem: npm
+    open-pull-requests-limit: 100
     directory: /
     schedule:
       interval: weekly
@@ -13,6 +17,8 @@ updates:
       include: scope
 
   - package-ecosystem: docker
+
+    open-pull-requests-limit: 100
     directory: /
     schedule:
       interval: weekly
@@ -21,6 +27,8 @@ updates:
       include: scope
 
   - package-ecosystem: github-actions
+
+    open-pull-requests-limit: 100
     directory: /
     schedule:
       interval: weekly
