@@ -22,6 +22,7 @@ The controller decides what to build; the builder builds it, and knows nothing e
 - **Joins like a Runner:** dials the controller, with a join token or an admin's approval
 - **Builds with BuildKit:** a rootless buildkitd of its own, or the one `BUILDKIT_HOST` names
 - **Pushes to any registry:** the login comes sealed with each build and is never kept
+- **amd64, arm64 or both:** one multi-architecture image; the other one needs QEMU on the host
 - **Signs and lists:** cosign signatures, offline, and an SBOM pushed with the image
 - **Live log:** every line of a build reaches the controller's job, its secrets masked
 - **Survives a drop:** what the controller did not store yet is sent again after a reconnect
@@ -32,6 +33,10 @@ The controller decides what to build; the builder builds it, and knows nothing e
 The RTE images are defined in the controller's Designer, which writes each one's Dockerfile.
 A build is a job: the controller hands it to a builder that is online, with the Dockerfile, the reference to push to,
 and the registry login and signing key sealed for that builder; the build's log and result come back as the job's.
+
+A runtime environment's `arch` says what it is built for: `amd64`, `arm64` or `all`, one image for both.
+The host's own architecture is built natively; the other one is emulated, slower, and needs QEMU registered on the host once:
+`docker run --privileged --rm tonistiigi/binfmt --install all`. Without it, such a build stops and says so.
 
 The builder and the controller meet over the controller's runner socket, at a version of its contract.
 A builder works with every controller that speaks the same contract, whatever their releases.

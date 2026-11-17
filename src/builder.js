@@ -9,6 +9,7 @@ import logger from "./logger.js";
 import { isStopping } from "./shutdown.js";
 import { nodeId, builderName, version, workDir, buildkitHost } from "./settings.js";
 import { writeDockerConfig, insecureRegistry } from "./registry.js";
+import { platformsOf, buildablePlatforms, QEMU_HINT } from "./buildkit.js";
 import { openJobSecrets } from "./socket/sealedSecrets.js";
 import { SOCKET_CONTRACT, WINDOW, CLOSE } from "./socket/protocol.js";
 import { JobSpool } from "./socket/spool.js";
@@ -137,7 +138,7 @@ function run(jobId, cmd, args, env = {}) {
  *
  * Args:
  *   jobId (number): the build's job.
- *   build (object): { image (its definition), files ({ name: text }), ref, sbom, sign }.
+ *   build (object): { image (its definition), files ({ name: text }), ref, arch, sbom, sign }.
  *   secrets (object): { registry, signing }.
  */
 async function runBuild(jobId, build, secrets) {
@@ -155,7 +156,19 @@ async function runBuild(jobId, build, secrets) {
       fs.writeFileSync(path.join(ctx, name), String(text));
     }
     const conf = writeDockerConfig(dir, secrets.registry);
-    say(jobId, `Building ${build.ref} on builder '${builderName()}'`);
+    // its architectures : another one than the host's is built only when QEMU is registered on
+    // the host, so a missing one stops the build here rather than push a partial image
+    const platforms = platformsOf(build.arch);
+    if (platforms.length) {
+      const can = await buildablePlatforms();
+      const missing = can ? platforms.filter((p) => !can.includes(p)) : [];
+      if (missing.length) {
+        message = `builder '${builderName()}' cannot build ${missing.join(", ")}: run once on its host ${QEMU_HINT}`;
+        say(jobId, message, "stderr");
+        return;
+      }
+    }
+    say(jobId, `Building ${build.ref}${platforms.length ? ` for ${platforms.join(", ")}` : ""} on builder '${builderName()}'`);
     // step 2 : the build, pushed ; its digest in the metadata file
     const meta = path.join(dir, "metadata.json");
     const args = [
@@ -167,6 +180,7 @@ async function runBuild(jobId, build, secrets) {
       "--output", `type=image,name=${build.ref},push=true${insecureRegistry(secrets.registry) ? ",registry.insecure=true" : ""}`,
       "--metadata-file", meta,
     ];
+    if (platforms.length) args.push("--opt", `platform=${platforms.join(",")}`);
     if (build.sbom) args.push("--opt", "attest:sbom=");
     const code = await run(jobId, "buildctl", args, { DOCKER_CONFIG: conf });
     if (b.aborted) {
