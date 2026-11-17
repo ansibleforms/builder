@@ -2,10 +2,10 @@
 // it starts in its own container (the image has buildkitd, rootlesskit and the subordinate ids).
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
+import { spawn, execFile } from "child_process";
 import logger from "./logger.js";
 import { onShutdown, isStopping } from "./shutdown.js";
-import { workDir } from "./settings.js";
+import { workDir, buildkitHost } from "./settings.js";
 
 /**
  * Starts its own rootless buildkitd, when no BUILDKIT_HOST is given.
@@ -29,4 +29,68 @@ export async function startBuildkit() {
     return false;
   }
   return true;
+}
+
+// ===========================================================================
+// ITS PLATFORMS
+// ===========================================================================
+
+// the platforms an image's arch asks for : one image, or one index with both
+export const ARCH_PLATFORMS = { amd64: ["linux/amd64"], arm64: ["linux/arm64"], all: ["linux/amd64", "linux/arm64"] };
+
+// how to let a host build another architecture : QEMU registered on it, once
+export const QEMU_HINT = "docker run --privileged --rm tonistiigi/binfmt --install all";
+
+/**
+ * The platforms a build's arch asks for.
+ *
+ * Args:
+ *   arch (string): amd64, arm64 or all ; none (a controller of before) : the builder's own.
+ *
+ * Returns:
+ *   string[]: the platforms (linux/amd64...) ; empty for the builder's own.
+ *
+ * Raises:
+ *   Error: an arch that is none of them.
+ */
+export function platformsOf(arch) {
+  if (arch === undefined || arch === null || arch === "") return [];
+  const platforms = ARCH_PLATFORMS[arch];
+  if (!platforms) throw new Error(`'${arch}' is no architecture: amd64, arm64 or all`);
+  return platforms;
+}
+
+/**
+ * The platforms BuildKit's workers can build, from buildctl debug workers' JSON : another
+ * architecture is among them only when QEMU is registered on the host.
+ *
+ * Args:
+ *   workers (object[]): the workers, as buildctl prints them.
+ *
+ * Returns:
+ *   string[]: os/architecture, each once.
+ */
+export function platformsOfWorkers(workers) {
+  const out = new Set();
+  for (const w of Array.isArray(workers) ? workers : []) for (const p of w.platforms || []) if (p.os && p.architecture) out.add(`${p.os}/${p.architecture}`);
+  return [...out];
+}
+
+/**
+ * The platforms BuildKit can build now.
+ *
+ * Returns:
+ *   Promise<string[]|null>: os/architecture ; null when BuildKit could not say.
+ */
+export function buildablePlatforms() {
+  return new Promise((resolve) => {
+    execFile("buildctl", ["--addr", buildkitHost(), "debug", "workers", "--format", "{{json .}}"], { timeout: 20000 }, (err, stdout) => {
+      if (err) return resolve(null);
+      try {
+        resolve(platformsOfWorkers(JSON.parse(stdout)));
+      } catch {
+        resolve(null);
+      }
+    });
+  });
 }
