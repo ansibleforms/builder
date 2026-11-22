@@ -1,6 +1,6 @@
 {
   "name": "ansibleforms-rte-builder",
-  "version": "7.6.0",
+  "version": "7.7.0",
   "description": "Builds the RTE images an AnsibleForms controller defines, and pushes them to their registry",
   "license": "GPL-3.0",
   "private": true,
