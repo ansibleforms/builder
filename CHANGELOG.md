@@ -5,6 +5,10 @@ The changes made to the builder between two releases wait under Unreleased and g
 
 ## Unreleased
 
+## 7.7.0
+
+The RTE builder of [AnsibleForms 7.7.0](https://github.com/ansibleforms/ansibleforms/releases/tag/7.7.0).
+
 ## 7.6.0
 
 The first release of the RTE builder, published with the version of the latest AnsibleForms release.
