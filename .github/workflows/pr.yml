@@ -35,3 +35,20 @@ jobs:
             style
           subjectPattern: ^[a-z].*$
           subjectPatternError: The subject starts with a lower case letter.
+
+  branch:
+    name: Branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Branch name has a type prefix
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          types='feat|fix|perf|refactor|revert|security|docs|test|ci|chore|build|style'
+          # dependabot names its own branches
+          if [[ "$BRANCH" =~ ^($types)/.+ || "$BRANCH" =~ ^dependabot/.+ ]]; then
+            echo "branch '$BRANCH' is fine"
+            exit 0
+          fi
+          echo "::error::branch '$BRANCH' should be named <type>/<short-description>, with type one of: ${types//|/, }, for example fix/ldap-group-filter"
+          exit 1

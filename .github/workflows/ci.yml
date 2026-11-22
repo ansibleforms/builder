@@ -48,3 +48,20 @@ jobs:
           out=$(docker run --rm ansibleforms-rte-builder:ci 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q "set RTE_TOKEN"
+
+  # the one check the main branch's ruleset requires : every job above passed, as the other
+  # repositories of the organisation require it
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [test, image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = "success" ] || { echo "::error::A CI job ended with '$result'."; exit 1; }
+          done
