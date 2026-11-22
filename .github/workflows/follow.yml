@@ -35,7 +35,11 @@ jobs:
     name: Open the version bump
     runs-on: ubuntu-latest
     steps:
+      # the workflow's own token (read only here) is not kept in git's config : the push below
+      # signs in with the App's token, which git would otherwise never send (a 403)
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: The version and its contract
         id: target
