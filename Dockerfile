@@ -1,6 +1,6 @@
 # The AnsibleForms RTE builder : builds the RTE images an AnsibleForms controller defines and pushes
-# them to their registry. Node and the builder, a rootless BuildKit and cosign. No python, no
-# ansible : what it builds brings its own.
+# them to their registry. One Go binary, which also signs (no cosign binary), and a rootless
+# BuildKit, on Alpine. No python, no ansible : what it builds brings its own.
 #
 #   docker run -d --name af-builder \
 #     --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
@@ -11,17 +11,21 @@
 # The two security options let its rootless buildkitd make the user namespaces it builds in ;
 # with BUILDKIT_HOST naming another BuildKit they are not needed.
 
-# BuildKit's rootless binaries (buildkitd, buildctl, rootlesskit) and cosign, pinned like the base ;
-# Dependabot proposes new pins
+# BuildKit's rootless binaries (buildkitd, rootlesskit, runc), pinned like the base ; Dependabot
+# proposes new pins. buildctl is left out : the builder speaks to buildkitd with its Go client
 FROM moby/buildkit:v0.35.1-rootless AS buildkit
-FROM ghcr.io/sigstore/cosign/cosign:v3.1.4 AS cosign
 
-FROM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS deps
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --omit=dev
+# the builder, compiled once on the build host for each target architecture (no emulation)
+FROM --platform=$BUILDPLATFORM golang:1.27-trixie@sha256:430985542100b871e108ccc00e8dcc5eef08ca14ee5825e98ebf563d8ffec4ee AS build
+ARG TARGETOS TARGETARCH
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY main.go ./
+COPY internal ./internal
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w" -o /out/ansibleforms-rte-builder .
 
-FROM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 
 ARG VERSION=
 LABEL org.opencontainers.image.source="https://github.com/ansibleforms/builder" \
@@ -31,28 +35,24 @@ LABEL org.opencontainers.image.source="https://github.com/ansibleforms/builder" 
       org.opencontainers.image.licenses="GPL-3.0" \
       org.opencontainers.image.version="${VERSION}"
 
-# tini as PID 1 ; uidmap's newuidmap and newgidmap, which rootlesskit maps node's subordinate ids
-# with, given the one capability each needs instead of setuid root (a setuid newuidmap is refused
-# writing the map in a container), as the BuildKit rootless image does ; fuse-overlayfs for a
-# kernel whose overlayfs a user namespace may not mount
-RUN apt-get update \
- && apt-get upgrade -y \
- && apt-get install -y --no-install-recommends tini ca-certificates uidmap fuse-overlayfs libcap2-bin \
+# tini as PID 1 ; shadow-uidmap's newuidmap and newgidmap, which rootlesskit maps the user's
+# subordinate ids with, given the one capability each needs instead of setuid root (a setuid
+# newuidmap is refused writing the map in a container) ; fuse-overlayfs for a kernel whose
+# overlayfs a user namespace may not mount. The user keeps the name node and the uid 1000 of the
+# Node.js images before, so an existing volume at /home/node/work still fits.
+RUN apk upgrade --no-cache \
+ && apk add --no-cache tini ca-certificates shadow-uidmap fuse3 fuse-overlayfs libcap-setcap \
  && chmod u-s /usr/bin/newuidmap /usr/bin/newgidmap \
  && setcap cap_setuid+ep /usr/bin/newuidmap \
  && setcap cap_setgid+ep /usr/bin/newgidmap \
- && apt-get purge -y libcap2-bin \
- && rm -rf /var/lib/apt/lists/* \
+ && apk del --no-cache libcap-setcap \
+ && addgroup -g 1000 node \
+ && adduser -D -u 1000 -G node -s /bin/sh node \
  && echo "node:100000:65536" > /etc/subuid \
  && echo "node:100000:65536" > /etc/subgid
 
-COPY --from=buildkit /usr/bin/buildkitd /usr/bin/buildctl /usr/bin/rootlesskit /usr/bin/buildkit-runc /usr/local/bin/
-COPY --from=cosign /ko-app/cosign /usr/local/bin/cosign
-
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json index.js healthcheck.js ./
-COPY src ./src
+COPY --from=buildkit /usr/bin/buildkitd /usr/bin/rootlesskit /usr/bin/buildkit-runc /usr/local/bin/
+COPY --from=build /out/ansibleforms-rte-builder /usr/local/bin/ansibleforms-rte-builder
 
 # its spool, its builds' files and its buildkitd's cache : keep them on a volume. USER : how
 # buildkitd knows it runs rootless ; XDG_RUNTIME_DIR : its run files
@@ -62,5 +62,6 @@ ENV USER=node \
     BUILDER_WORK_PATH=/home/node/work \
     XDG_RUNTIME_DIR=/home/node/work/run
 USER node
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD ["node", "./healthcheck.js"]
-ENTRYPOINT ["/usr/bin/tini", "--", "node", "./index.js"]
+WORKDIR /home/node
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD ["ansibleforms-rte-builder", "health"]
+ENTRYPOINT ["/sbin/tini", "--", "ansibleforms-rte-builder"]

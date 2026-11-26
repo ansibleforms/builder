@@ -18,16 +18,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-go@v7
         with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
+          go-version-file: go.mod
       - name: The controller's latest release
         id: latest
         env:
           GH_TOKEN: ${{ github.token }}
         run: echo "tag=$(gh release view --repo ansibleforms/ansibleforms --json tagName --jq .tagName)" >> "$GITHUB_OUTPUT"
-      - run: npm test -- tests/contract.test.js
+      - name: The contract is the controller's
         env:
-          CONTROLLER_PROTOCOL_URL: https://raw.githubusercontent.com/ansibleforms/ansibleforms/${{ steps.latest.outputs.tag }}/server/src/rte/socket/protocol.js
+          TAG: ${{ steps.latest.outputs.tag }}
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://raw.githubusercontent.com/ansibleforms/ansibleforms/${TAG}/server/src/rte/socket/protocol.js" -o "$RUNNER_TEMP/protocol.js"
+          CONTROLLER_PROTOCOL_FILE="$RUNNER_TEMP/protocol.js" go test -run TestContractIsTheController -v ./internal/socket/

@@ -10,6 +10,6 @@ squash commit. See CONTRIBUTING.md.
 ## Checklist
 
 - [ ] Branch is named `<type>/<description>` and the title is a Conventional Commit
-- [ ] `npm test` passes
+- [ ] `gofmt -l .` prints nothing, and `go vet ./...` and `go test ./...` pass
 - [ ] Built the image and ran a build against a controller, or the change does not affect it
-- [ ] A change of `src/socket/` follows a change of the controller's socket contract
+- [ ] A change of `internal/socket/` follows a change of the controller's socket contract

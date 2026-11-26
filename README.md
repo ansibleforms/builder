@@ -1,10 +1,10 @@
-# AnsibleForms RTE builder
+# AnsibleForms RTE Builder
 
 [![CI](https://img.shields.io/github/actions/workflow/status/ansibleforms/builder/ci.yml?branch=main&label=CI)](https://github.com/ansibleforms/builder/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-ansibleforms.com-informational)](https://ansibleforms.com)
 
-The builder of the RTE images an [AnsibleForms](https://github.com/ansibleforms/ansibleforms) controller defines, written in Node.js.
+The builder of the RTE images an [AnsibleForms](https://github.com/ansibleforms/ansibleforms) controller defines, written in Go.
 It joins the controller, builds each image the Designer asks for with BuildKit, and pushes it to its registry.
 
 ```bash
