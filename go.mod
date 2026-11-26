@@ -11,7 +11,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/secure-systems-lab/go-securesystemslib v0.11.1
 	github.com/tonistiigi/fsutil v0.0.0-20261103125000-e075fd9305eb
-	golang.org/x/sync v0.24.0
+	golang.org/x/sync v0.25.0
 )
 
 require (
