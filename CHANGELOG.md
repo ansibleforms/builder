@@ -5,6 +5,11 @@ The changes made to the builder between two releases wait under Unreleased and g
 
 ## Unreleased
 
+### Changed
+
+- **Written in Go:** one binary that also signs, on Alpine; the image is 235 MB instead of 794 MB
+- **Healthcheck:** the image checks itself with `ansibleforms-rte-builder health`; buildctl and cosign are no longer in it
+
 ## 7.7.0
 
 The RTE builder of [AnsibleForms 7.7.0](https://github.com/ansibleforms/ansibleforms/releases/tag/7.7.0).

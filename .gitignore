@@ -1,3 +1,5 @@
-node_modules/
+# the binary built locally (the image builds the released one)
+/ansibleforms-rte-builder
 .env
-coverage/
+# the tests' coverage
+coverage.out

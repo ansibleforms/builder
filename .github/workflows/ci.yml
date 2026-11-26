@@ -1,16 +1,31 @@
 name: CI
 
-# Every push and pull request : the tests, then the image built and its tools started (buildctl,
-# buildkitd, rootlesskit, cosign) - nothing pushed.
+# Checks every pull request and every push to main or a release/<major>.x line as a release
+# would build it: the code is formatted (gofmt), go vet finds nothing, the tests pass and cover
+# every statement, and the builder builds for Linux on amd64 and arm64 and prints the version
+# of internal/version (version.App) back. Then the image is built, and a real build goes
+# through it: its own rootless buildkitd builds, the builder pushes to a registry and signs,
+# and cosign verify takes the signature. Nothing is published. A Dependabot bump has to pass it
+# before it is merged.
+#
+# The release workflow waits for this one: once it finishes green on a push, a version.App
+# that has no release yet is released.
+#
+# The main ruleset requires one check, CI passed, which passes only when every job did: a job
+# added later is covered without changing the ruleset.
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+  push:
+    branches: [main, 'release/**']
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -18,18 +33,67 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-go@v7
         with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm test
+          go-version-file: go.mod
 
+      - name: Formatted
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::not formatted with gofmt: $unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+      # every statement is run by a test : the total has to be 100.0%, and what is not covered
+      # is listed when it is not
+      - name: Coverage
+        run: |
+          set -euo pipefail
+          go test -coverpkg=./... -coverprofile=coverage.out ./... > /dev/null
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')"
+          echo "Coverage: $total"
+          if [ "$total" != "100.0%" ]; then
+            go tool cover -func=coverage.out | grep -v "100.0%"
+            echo "::error::Coverage is $total, not 100.0%."; exit 1
+          fi
+
+      # its version is read from its one line exactly as the release workflow reads it, and the
+      # binary has to say it
+      - name: Build
+        run: |
+          set -euo pipefail
+          version="$(sed -nE 's/^const App = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' internal/version/version.go)"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::internal/version/version.go needs exactly one line const App = \"x.y.z\"."; exit 1
+          fi
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "-s -w" \
+              -o "/tmp/ansibleforms-rte-builder_linux_$arch" .
+          done
+          printed="$(/tmp/ansibleforms-rte-builder_linux_amd64 version)"
+          [ "$printed" = "$version" ] || { echo "::error::The binary says '$printed', not $version."; exit 1; }
+
+  # the image built, its tools started, then a real build : the image's own rootless buildkitd
+  # builds, the builder pushes to a registry and signs, and cosign verify takes the signature
+  # (internal/builder TestRealBuild, a fake controller handing the build over the socket)
   image:
     name: Image
     runs-on: ubuntu-latest
+    env:
+      # the cosign that checks the signature : the builder ships none
+      COSIGN_IMAGE: ghcr.io/sigstore/cosign/cosign:v3.1.4
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
@@ -38,10 +102,11 @@ jobs:
           tags: ansibleforms-rte-builder:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
       - name: Smoke test the image
         run: |
           set -euo pipefail
-          for tool in "buildctl --version" "buildkitd --version" "rootlesskit --version" "cosign version" "node --version"; do
+          for tool in "buildkitd --version" "rootlesskit --version" "ansibleforms-rte-builder version"; do
             docker run --rm --entrypoint sh ansibleforms-rte-builder:ci -c "$tool"
           done
           # without its settings it refuses to start (exit 1), saying why
@@ -49,9 +114,36 @@ jobs:
           echo "$out"
           echo "$out" | grep -q "set RTE_TOKEN"
 
-  # the one check the main branch's ruleset requires : every job above passed, as the other
-  # repositories of the organisation require it
-  ci-passed:
+      # Ubuntu's runners keep unprivileged user namespaces from unconfined processes ; a
+      # builder's host must allow them
+      - name: Its rootless buildkitd, a registry and cosign
+        run: |
+          set -euo pipefail
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          docker run -d --name registry --network host registry:2
+          docker run -d --name buildkitd --network host \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+            --entrypoint rootlesskit ansibleforms-rte-builder:ci \
+            buildkitd --oci-worker-no-process-sandbox --addr tcp://127.0.0.1:1234 --root /home/node/work/root
+          for i in $(seq 1 30); do nc -z 127.0.0.1 1234 && break; sleep 1; done
+          nc -z 127.0.0.1 1234 || { docker logs buildkitd; exit 1; }
+          id=$(docker create "$COSIGN_IMAGE")
+          docker cp "$id:/ko-app/cosign" "$RUNNER_TEMP/cosign"
+          docker rm "$id"
+
+      - name: Build, push and sign through the builder
+        env:
+          E2E_BUILDKIT_HOST: tcp://127.0.0.1:1234
+          E2E_REGISTRY: localhost:5000
+        run: E2E_COSIGN="$RUNNER_TEMP/cosign" go test -count=1 -run TestRealBuild -v ./internal/builder/
+
+      - name: The buildkitd's log
+        if: failure()
+        run: docker logs buildkitd 2>&1 | tail -50
+
+  # The one check the ruleset requires, so a job added later is covered without
+  # changing the ruleset. This passes only when every job did.
+  passed:
     name: CI passed
     if: always()
     needs: [test, image]

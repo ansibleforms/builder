@@ -1,6 +1,6 @@
 name: Release
 
-# Releases the builder at the version package.json says, which follows AnsibleForms' (Follow app
+# Releases the builder at the version internal/version/version.go says, which follows AnsibleForms' (Follow app
 # release moves it). Once CI is green on a push to main, and when that version has no release
 # yet, it publishes the image for amd64 and arm64 :
 #   ghcr.io/ansibleforms/ansibleforms-rte-builder:<version>, :<major>.<minor>, :<major> and :latest
@@ -47,7 +47,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version="$(node -p "require('./package.json').version")"
+          version="$(sed -nE 's/^const App = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' internal/version/version.go)"
           if [ "$version" = "0.0.0" ]; then
             echo "No AnsibleForms release followed yet: nothing to release."; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
