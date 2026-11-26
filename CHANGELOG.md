@@ -5,6 +5,10 @@ The changes made to the builder between two releases wait under Unreleased and g
 
 ## Unreleased
 
+## 7.8.0
+
+The RTE builder of [AnsibleForms 7.8.0](https://github.com/ansibleforms/ansibleforms/releases/tag/7.8.0).
+
 ### Changed
 
 - **Written in Go:** one binary that also signs, on Alpine; the image is 235 MB instead of 794 MB

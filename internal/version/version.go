@@ -6,4 +6,4 @@ package version
 // Follow app release pull request moves it with every AnsibleForms release, and the release
 // workflow reads it from this line to name the release, so it stays one line of the form
 // const App = "x.y.z".
-const App = "7.7.0"
+const App = "7.8.0"
